@@ -20,6 +20,9 @@ from app.utils.time_utils import get_now
 
 logger = logging.getLogger(__name__)
 
+WARRANTY_TEAM_MAX_MEMBERS = 5
+STANDARD_TEAM_MAX_MEMBERS = 10
+
 
 class RedeemFlowService:
     """兑换流程服务类"""
@@ -71,8 +74,26 @@ class RedeemFlowService:
                     "error": None
                 }
 
+            # 2. 根据兑换码类型选择对应车队池
+            stmt = select(RedemptionCode).where(RedemptionCode.code == code)
+            result = await db_session.execute(stmt)
+            redemption_code = result.scalar_one_or_none()
+            if not redemption_code:
+                return {
+                    "success": False,
+                    "valid": False,
+                    "reason": None,
+                    "teams": [],
+                    "error": "兑换码记录丢失"
+                }
+
+            target_max_members = WARRANTY_TEAM_MAX_MEMBERS if redemption_code.has_warranty else STANDARD_TEAM_MAX_MEMBERS
+
             # 2. 获取可用 Team 列表
-            teams_result = await self.team_service.get_available_teams(db_session)
+            teams_result = await self.team_service.get_available_teams(
+                db_session,
+                target_max_members=target_max_members
+            )
 
             if not teams_result["success"]:
                 return {
@@ -83,7 +104,10 @@ class RedeemFlowService:
                     "error": teams_result["error"]
                 }
 
-            logger.info(f"验证兑换码成功: {code}, 可用 Team 数量: {len(teams_result['teams'])}")
+            target_pool_desc = "<=5 人车队" if redemption_code.has_warranty else ">5 人车队"
+            logger.info(
+                f"验证兑换码成功: {code}, 目标车队池={target_pool_desc}, 可用 Team 数量: {len(teams_result['teams'])}"
+            )
 
             return {
                 "success": True,
@@ -106,7 +130,8 @@ class RedeemFlowService:
     async def select_team_auto(
         self,
         db_session: AsyncSession,
-        email: Optional[str] = None
+        email: Optional[str] = None,
+        target_max_members: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         自动选择 Team (选择过期时间最早的)
@@ -115,6 +140,7 @@ class RedeemFlowService:
         Args:
             db_session: 数据库会话
             email: 用户邮箱 (用于排除已加入的 Team)
+            target_max_members: 目标车队最大人数 (例如 5=质保池,10=非质保池)
 
         Returns:
             结果字典,包含 success, team_id, error
@@ -134,6 +160,11 @@ class RedeemFlowService:
                 Team.status == "active",
                 Team.current_members < Team.max_members
             )
+            if target_max_members is not None:
+                if target_max_members <= WARRANTY_TEAM_MAX_MEMBERS:
+                    stmt = stmt.where(Team.max_members <= WARRANTY_TEAM_MAX_MEMBERS)
+                else:
+                    stmt = stmt.where(Team.max_members > WARRANTY_TEAM_MAX_MEMBERS)
             
             # 排除已加入的 Team
             if exclude_team_ids:
@@ -148,13 +179,20 @@ class RedeemFlowService:
                 reason = "没有可用的 Team"
                 if exclude_team_ids:
                     reason = "您已加入所有可用 Team"
+                if target_max_members is not None:
+                    pool_desc = "<=5 人车队" if target_max_members <= WARRANTY_TEAM_MAX_MEMBERS else ">5 人车队"
+                    reason = f"没有可用的 {pool_desc}"
+                    if exclude_team_ids:
+                        reason = f"您已加入所有可用的 {pool_desc}"
                 return {
                     "success": False,
                     "team_id": None,
                     "error": reason
                 }
 
-            logger.info(f"自动选择 Team: {team.id} (过期时间: {team.expires_at})")
+            logger.info(
+                f"自动选择 Team: {team.id} (过期时间: {team.expires_at}, max_members={team.max_members})"
+            )
 
             return {
                 "success": True,
@@ -226,9 +264,14 @@ class RedeemFlowService:
             # 确定本次尝试的目标 Team
             is_auto_select = current_target_team_id is None
             active_team_id = current_target_team_id
+            target_max_members = WARRANTY_TEAM_MAX_MEMBERS if rc_pre.has_warranty else STANDARD_TEAM_MAX_MEMBERS
             
             if is_auto_select:
-                select_result = await self.select_team_auto(db_session, email=email)
+                select_result = await self.select_team_auto(
+                    db_session,
+                    email=email,
+                    target_max_members=target_max_members
+                )
                 if not select_result["success"]:
                     return {"success": False, "error": select_result["error"]}
                 active_team_id = select_result["team_id"]
@@ -269,6 +312,8 @@ class RedeemFlowService:
                     if redemption_code.status not in allowed_statuses:
                         return {"success": False, "error": "兑换码已被使用"}
 
+                    is_warranty_code = redemption_code.has_warranty
+
                     # 2. 确定 Team (使用阶段 0 选定并同步过的 Team)
                     team_id_final = active_team_id
 
@@ -283,6 +328,21 @@ class RedeemFlowService:
                             current_target_team_id = None
                             continue
                         return {"success": False, "error": f"Team {team_id_final} 不存在"}
+
+                    if is_warranty_code and team.max_members > WARRANTY_TEAM_MAX_MEMBERS:
+                        expected_type_desc = "质保车队(<=5人)"
+                        if is_auto_select and attempt < max_retries - 1:
+                            logger.warning(f"自动选择到了非质保车队 Team {team_id_final}, 尝试下一次循环")
+                            current_target_team_id = None
+                            continue
+                        return {"success": False, "error": f"兑换码与车队类型不匹配，请选择{expected_type_desc}"}
+                    if (not is_warranty_code) and team.max_members <= WARRANTY_TEAM_MAX_MEMBERS:
+                        expected_type_desc = "非质保车队(>5人)"
+                        if is_auto_select and attempt < max_retries - 1:
+                            logger.warning(f"自动选择到了质保车队 Team {team_id_final}, 尝试下一次循环")
+                            current_target_team_id = None
+                            continue
+                        return {"success": False, "error": f"兑换码与车队类型不匹配，请选择{expected_type_desc}"}
                     
                     if team.current_members >= team.max_members:
                         if is_auto_select and attempt < max_retries - 1:
@@ -299,7 +359,6 @@ class RedeemFlowService:
                         return {"success": False, "error": f"Team 状态异常: {team.status}"}
 
                     # 特殊处理质保码逻辑
-                    is_warranty_code = redemption_code.has_warranty
                     is_first_use = redemption_code.status == "unused"
                     
                     if not is_first_use:

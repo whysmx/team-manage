@@ -216,11 +216,20 @@ async function confirmRedeem(teamId) {
 function showSuccessResult(data) {
     const resultContent = document.getElementById('resultContent');
     const teamInfo = data.team_info || {};
+    const groupQrUrl = data.group_qr_url ? escapeHtml(data.group_qr_url) : '';
 
     resultContent.innerHTML = `
+        ${groupQrUrl ? `
+        <div class="qr-top-card" style="margin: 0 auto 1.5rem auto;">
+            <p class="qr-top-title">加入企业微信群提供<span style="color: var(--danger);">售后服务</span></p>
+            <p class="qr-top-title">提供GPT/Gemini/Grok/Cursor等会员服务</p>
+            <img src="${groupQrUrl}" alt="群邀请二维码" class="qr-top-image">
+            <p class="qr-top-warning" style="margin-top: 10px;">⚠️ 群二维码即将失效</p>
+        </div>
+        ` : ''}
         <div class="result-success">
             <div class="result-icon"><i data-lucide="check-circle" style="width: 64px; height: 64px; color: var(--success);"></i></div>
-            <div class="result-title">兑换成功!</div>
+            <div class="result-title">兑换成功，请查收<span style="color: var(--danger);">邮件</span>！</div>
             <div class="result-message">${escapeHtml(data.message) || '您已成功加入 Team'}</div>
 
             <div class="result-details">
@@ -252,6 +261,7 @@ function showSuccessResult(data) {
     if (window.lucide) lucide.createIcons();
 
     showStep(3);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 // 显示错误结果
@@ -280,18 +290,27 @@ function showErrorResult(errorMessage) {
 }
 
 // 格式化日期
-function formatDate(dateString) {
+function formatDate(dateString, includeTime = false) {
     if (!dateString) return '-';
 
-    try {
-        const date = new Date(dateString);
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    } catch (e) {
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) {
         return dateString;
     }
+
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const formattedDate = `${year}-${month}-${day}`;
+
+    if (!includeTime) {
+        return formattedDate;
+    }
+
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${formattedDate} ${hours}:${minutes}:${seconds}`;
 }
 
 // ========== 质保查询功能 ==========
@@ -379,7 +398,7 @@ function showWarrantyResult(data) {
                         ${data.warranty_expires_at ? `
                         <div style="text-align: right;">
                             <div style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.4rem;">质保到期时间</div>
-                            <div style="font-size: 1rem;">${formatDate(data.warranty_expires_at)}</div>
+                            <div style="font-size: 1rem;">${formatDate(data.warranty_expires_at, true)}</div>
                         </div>
                         ` : ''}
                     </div>
@@ -426,17 +445,17 @@ function showWarrantyResult(data) {
                                      </div>
                                      <div>
                                          <div style="color: var(--text-muted); margin-bottom: 0.2rem;">兑换时间</div>
-                                         <div>${formatDate(record.used_at)}</div>
+                                         <div>${formatDate(record.used_at, true)}</div>
                                      </div>
                                      <div style="grid-column: span 2;">
-                                         <div style="color: var(--text-muted); margin-bottom: 0.2rem;">Team 到期</div>
-                                         <div style="font-weight: 500;">${formatDate(record.team_expires_at)}</div>
+                                         <div style="color: var(--text-muted); margin-bottom: 0.2rem;">Team 到期时间</div>
+                                         <div style="font-weight: 500;">${formatDate(record.team_expires_at, true)}</div>
                                      </div>
                                     ${record.has_warranty ? `
                                     <div style="grid-column: span 2;">
                                         <div style="color: var(--text-muted); margin-bottom: 0.2rem;">质保到期</div>
                                         <div style="${record.warranty_valid ? 'color: var(--success);' : 'color: var(--danger);'}">
-                                            ${record.warranty_expires_at ? `${formatDate(record.warranty_expires_at)} ${record.warranty_valid ? '(有效)' : '(已过期)'}` : '尚未开始计算 (首次使用后开启)'}
+                                            ${record.warranty_expires_at ? `${formatDate(record.warranty_expires_at, true)} ${record.warranty_valid ? '(有效)' : '(已过期)'}` : '尚未开始计算 (首次使用后开启)'}
                                         </div>
                                     </div>
                                     ` : ''}

@@ -107,6 +107,8 @@
                         onclick="switchModalTab('importTeamModal', 'singleImport')">单个导入</button>
                     <button class="modal-tab-btn"
                         onclick="switchModalTab('importTeamModal', 'batchImport')">批量导入</button>
+                    <button class="modal-tab-btn"
+                        onclick="switchModalTab('importTeamModal', 'emailImport')">邮箱导入</button>
                 </div>
 
                 <div id="singleImport" class="import-panel">
@@ -182,6 +184,40 @@
                         </div>
                         <button type="submit" class="btn btn-primary">批量导入</button>
                     </form>
+                </div>
+
+                <div id="emailImport" class="import-panel" style="display: none;">
+                    <div class="form-group">
+                        <label>邮箱列表（每行一个） <span class="required">*</span></label>
+                        <textarea id="emailImportTextarea" class="form-control" rows="6"
+                            placeholder="example1@hotmail.com&#10;example2@gmail.com"></textarea>
+                        <small class="form-text">点击“生成列表”后，可逐行手动提取 AT 并导入 Team</small>
+                    </div>
+                    <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem;">
+                        <button type="button" class="btn btn-secondary" onclick="generateEmailImportRows()">生成列表</button>
+                        <button type="button" class="btn btn-secondary" onclick="clearEmailImportRows()">清空列表</button>
+                    </div>
+
+                    <div class="table-container" style="max-height: 320px; margin: 0;">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>邮箱</th>
+                                    <th>导入时间</th>
+                                    <th>提取时间</th>
+                                    <th>状态</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="emailImportTableBody">
+                                <tr>
+                                    <td colspan="5" style="text-align: center; color: var(--text-muted);">
+                                        暂无邮箱，请先生成列表
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>

@@ -37,6 +37,16 @@ function formatDateTime(dateString) {
     return `${year}-${month}-${day} ${hours}:${minutes}`;
 }
 
+function escapeHtml(value) {
+    if (!value) return '';
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 // 登出函数
 async function logout() {
     if (!confirm('确定要登出吗?')) {
@@ -334,6 +344,154 @@ async function handleBatchImport(event) {
     } finally {
         submitButton.disabled = false;
         submitButton.textContent = '批量导入';
+    }
+}
+
+// === 邮箱导入 Team 逻辑 ===
+
+let emailImportRows = [];
+let emailImportSeq = 1;
+
+function normalizeEmailList(text) {
+    return text
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .map(line => line.toLowerCase());
+}
+
+function renderEmailImportRows() {
+    const tbody = document.getElementById('emailImportTableBody');
+    if (!tbody) return;
+
+    if (emailImportRows.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="5" style="text-align: center; color: var(--text-muted);">
+                    暂无邮箱，请先生成列表
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = emailImportRows.map((row, index) => {
+        let statusClass = 'status-info';
+        let statusText = '待处理';
+
+        if (row.status === 'running') {
+            statusClass = 'status-warning';
+            statusText = '提取中';
+        } else if (row.status === 'success') {
+            statusClass = 'status-active';
+            statusText = '成功';
+        } else if (row.status === 'error') {
+            statusClass = 'status-danger';
+            statusText = '失败';
+        }
+
+        const btnText = row.running ? '处理中...' : (row.status === 'success' ? '重新导入' : '提取AT并导入');
+        const escapedMessage = escapeHtml(row.message || '');
+        const escapedEmail = escapeHtml(row.email);
+        const importedAt = formatDateTime(row.importedAt);
+        const extractedAt = formatDateTime(row.extractedAt);
+
+        return `
+            <tr>
+                <td>
+                    ${escapedEmail}
+                    ${escapedMessage ? `<div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">${escapedMessage}</div>` : ''}
+                </td>
+                <td>${importedAt}</td>
+                <td>${extractedAt}</td>
+                <td><span class="status-badge ${statusClass}">${statusText}</span></td>
+                <td>
+                    <button class="btn btn-sm btn-primary" onclick="runEmailImportRow(${index})" ${row.running ? 'disabled' : ''}>
+                        ${btnText}
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function generateEmailImportRows() {
+    const textarea = document.getElementById('emailImportTextarea');
+    if (!textarea) return;
+
+    const emails = normalizeEmailList(textarea.value || '');
+    if (emails.length === 0) {
+        showToast('请输入至少一个邮箱', 'warning');
+        return;
+    }
+
+    const existing = new Set(emailImportRows.map(item => item.email.toLowerCase()));
+    const now = new Date().toISOString();
+    let added = 0;
+
+    emails.forEach(email => {
+        if (existing.has(email)) return;
+        emailImportRows.push({
+            id: emailImportSeq++,
+            email,
+            importedAt: now,
+            extractedAt: null,
+            status: 'pending',
+            message: '',
+            running: false
+        });
+        existing.add(email);
+        added += 1;
+    });
+
+    renderEmailImportRows();
+
+    if (added === 0) {
+        showToast('邮箱都已在列表中', 'info');
+    } else {
+        showToast(`已添加 ${added} 个邮箱`, 'success');
+    }
+}
+
+function clearEmailImportRows() {
+    emailImportRows = [];
+    renderEmailImportRows();
+}
+
+async function runEmailImportRow(index) {
+    const row = emailImportRows[index];
+    if (!row || row.running) return;
+
+    row.running = true;
+    row.status = 'running';
+    row.message = '正在提取 AT 并导入 Team...';
+    renderEmailImportRows();
+
+    try {
+        const result = await apiCall('/admin/teams/import/email/run', {
+            method: 'POST',
+            body: JSON.stringify({
+                email: row.email
+            })
+        });
+
+        if (result.success) {
+            row.status = 'success';
+            row.extractedAt = result.data.extracted_at || new Date().toISOString();
+            row.message = result.data.message || '导入成功';
+            showToast(`${row.email} 导入成功`, 'success');
+        } else {
+            row.status = 'error';
+            row.message = result.error || '导入失败';
+            showToast(`${row.email} 导入失败`, 'error');
+        }
+    } catch (error) {
+        row.status = 'error';
+        row.message = '网络错误';
+        showToast(`${row.email} 网络错误`, 'error');
+    } finally {
+        row.running = false;
+        renderEmailImportRows();
     }
 }
 

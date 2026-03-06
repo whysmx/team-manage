@@ -4,27 +4,33 @@
 """
 import logging
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from datetime import datetime, timedelta
+from pathlib import Path
+from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 import json
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 
 from app.database import get_db
 from app.dependencies.auth import require_admin
 from app.services.team import TeamService
 from app.services.redemption import RedemptionService
+from app.services.email_import import email_import_service
 from app.utils.time_utils import get_now
 
 logger = logging.getLogger(__name__)
+
+GROUP_QR_BASE_NAME = "group-qr"
+GROUP_QR_UPLOAD_DIR = Path(__file__).resolve().parents[1] / "static" / "images" / "home"
+GROUP_QR_ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+GROUP_QR_MAX_SIZE = 5 * 1024 * 1024  # 5MB
 
 # 创建路由器
 router = APIRouter(
     prefix="/admin",
     tags=["admin"]
 )
-
-import json
 
 # 服务实例
 team_service = TeamService()
@@ -42,6 +48,12 @@ class TeamImportRequest(BaseModel):
     email: Optional[str] = Field(None, description="邮箱 (单个导入)")
     account_id: Optional[str] = Field(None, description="Account ID (单个导入)")
     content: Optional[str] = Field(None, description="批量导入内容")
+
+
+class TeamImportByEmailRequest(BaseModel):
+    """邮箱导入请求"""
+    email: EmailStr = Field(..., description="邮箱")
+    account_id: Optional[str] = Field(None, description="Account ID (可选)")
 
 
 class AddMemberRequest(BaseModel):
@@ -116,7 +128,7 @@ async def admin_dashboard(
         # 计算统计数据
         stats = {
             "total_teams": len(all_teams),
-            "available_teams": len([t for t in all_teams if t.get("status") == "active" and t.get("current_members", 0) < t.get("max_members", 6)]),
+            "available_teams": len([t for t in all_teams if t.get("status") == "active" and t.get("current_members", 0) < t.get("max_members", 5)]),
             "total_codes": len(all_codes),
             "used_codes": len([c for c in all_codes if c.get("status") == "used"])
         }
@@ -331,7 +343,41 @@ async def team_import(
         )
 
 
+@router.post("/teams/import/email/run")
+async def team_import_by_email(
+    import_data: TeamImportByEmailRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    通过邮箱验证码流程提取 AT，并导入 Team（单条手动触发）
+    """
+    try:
+        logger.info(f"管理员触发邮箱导入 Team: {import_data.email}")
 
+        result = await email_import_service.extract_at_and_import_team(
+            email=str(import_data.email),
+            db_session=db,
+            account_id=import_data.account_id
+        )
+
+        if not result.get("success"):
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=result
+            )
+
+        return JSONResponse(content=result)
+
+    except Exception as e:
+        logger.error(f"邮箱导入 Team 失败: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "success": False,
+                "error": f"邮箱导入失败: {str(e)}"
+            }
+        )
 
 
 @router.get("/teams/{team_id}/members/list")
@@ -1124,6 +1170,37 @@ async def settings_page(
         # 获取当前配置
         proxy_config = await settings_service.get_proxy_config(db)
         log_level = await settings_service.get_log_level(db)
+        group_qr_path = await settings_service.get_setting(db, "group_qr_path", "")
+        group_qr_version = await settings_service.get_setting(db, "group_qr_version", "")
+        group_qr_updated_raw = await settings_service.get_setting(db, "group_qr_updated_at", "")
+
+        group_qr_url = ""
+        if group_qr_path:
+            group_qr_url = f"{group_qr_path}?v={group_qr_version}" if group_qr_version else group_qr_path
+
+        group_qr_updated_at = None
+        group_qr_next_update_at = None
+        group_qr_status_text = ""
+        group_qr_overdue = False
+
+        if group_qr_updated_raw:
+            try:
+                group_qr_updated_at = datetime.fromisoformat(group_qr_updated_raw.replace("Z", "+00:00"))
+                if group_qr_updated_at.tzinfo is not None:
+                    group_qr_updated_at = group_qr_updated_at.replace(tzinfo=None)
+                group_qr_next_update_at = group_qr_updated_at + timedelta(days=7)
+
+                days_left = (group_qr_next_update_at.date() - get_now().date()).days
+                if days_left < 0:
+                    group_qr_overdue = True
+                    group_qr_status_text = f"二维码已超期 {-days_left} 天，请尽快更新"
+                elif days_left == 0:
+                    group_qr_status_text = "二维码今天到期，建议今天更新"
+                else:
+                    group_qr_status_text = f"距离下次建议更新还有 {days_left} 天"
+            except Exception:
+                group_qr_updated_at = None
+                group_qr_next_update_at = None
 
         return templates.TemplateResponse(
             "admin/settings/index.html",
@@ -1136,7 +1213,12 @@ async def settings_page(
                 "log_level": log_level,
                 "webhook_url": await settings_service.get_setting(db, "webhook_url", ""),
                 "low_stock_threshold": await settings_service.get_setting(db, "low_stock_threshold", "10"),
-                "api_key": await settings_service.get_setting(db, "api_key", "")
+                "api_key": await settings_service.get_setting(db, "api_key", ""),
+                "group_qr_url": group_qr_url,
+                "group_qr_updated_at": group_qr_updated_at,
+                "group_qr_next_update_at": group_qr_next_update_at,
+                "group_qr_status_text": group_qr_status_text,
+                "group_qr_overdue": group_qr_overdue
             }
         )
 
@@ -1303,4 +1385,90 @@ async def update_webhook_settings(
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"success": False, "error": f"更新失败: {str(e)}"}
+        )
+
+
+@router.post("/settings/group-qr")
+async def upload_group_qr(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    上传并更新群邀请二维码
+    """
+    try:
+        from app.services.settings import settings_service
+
+        if not file or not file.filename:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"success": False, "error": "请选择要上传的图片文件"}
+            )
+
+        ext = Path(file.filename).suffix.lower()
+        if ext not in GROUP_QR_ALLOWED_EXTENSIONS:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"success": False, "error": "仅支持 PNG/JPG/JPEG/WebP/GIF 格式"}
+            )
+
+        content = await file.read()
+        if not content:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"success": False, "error": "上传文件为空"}
+            )
+        if len(content) > GROUP_QR_MAX_SIZE:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"success": False, "error": "图片大小不能超过 5MB"}
+            )
+
+        GROUP_QR_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        saved_name = f"{GROUP_QR_BASE_NAME}{ext}"
+        saved_path = GROUP_QR_UPLOAD_DIR / saved_name
+
+        # 清理旧文件，避免目录里保留多份二维码
+        for old_file in GROUP_QR_UPLOAD_DIR.glob(f"{GROUP_QR_BASE_NAME}.*"):
+            if old_file != saved_path and old_file.is_file():
+                old_file.unlink(missing_ok=True)
+
+        saved_path.write_bytes(content)
+        await file.close()
+
+        now = get_now()
+        next_update_at = now + timedelta(days=7)
+        group_qr_path = f"/static/images/home/{saved_name}"
+        group_qr_version = now.strftime("%Y%m%d%H%M%S")
+        success = await settings_service.update_settings(
+            db,
+            {
+                "group_qr_path": group_qr_path,
+                "group_qr_version": group_qr_version,
+                "group_qr_updated_at": now.isoformat()
+            }
+        )
+
+        if not success:
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={"success": False, "error": "二维码信息保存失败"}
+            )
+
+        logger.info(f"管理员更新群二维码: {saved_name}, 下次建议更新时间: {next_update_at.isoformat()}")
+        return JSONResponse(
+            content={
+                "success": True,
+                "message": "群二维码已更新",
+                "group_qr_url": f"{group_qr_path}?v={group_qr_version}",
+                "updated_at": now.isoformat(),
+                "next_update_at": next_update_at.isoformat()
+            }
+        )
+    except Exception as e:
+        logger.error(f"更新群二维码失败: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"success": False, "error": f"更新群二维码失败: {str(e)}"}
         )

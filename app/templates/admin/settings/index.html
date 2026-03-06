@@ -7,6 +7,14 @@
     <h2>系统设置</h2>
 </div>
 
+{% if group_qr_status_text %}
+<div class="content-section" style="margin-top: 0;">
+    <div class="settings-top-reminder {% if group_qr_overdue %}is-overdue{% endif %}">
+        <strong>群二维码更新提醒：</strong>{{ group_qr_status_text }}
+    </div>
+</div>
+{% endif %}
+
 <!-- 代理配置 -->
 <div class="content-section">
     <div class="section-header">
@@ -87,6 +95,45 @@
     </form>
 </div>
 
+<!-- 群邀请二维码 -->
+<div class="content-section">
+    <div class="section-header">
+        <h3>群邀请二维码</h3>
+    </div>
+
+    <form id="groupQrForm" class="settings-form" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="groupQrFile">上传二维码图片</label>
+            <input type="file" id="groupQrFile" name="file" accept=".png,.jpg,.jpeg,.webp,.gif" class="form-control">
+            <p class="form-help">支持 PNG/JPG/JPEG/WebP/GIF，上传后会覆盖旧二维码</p>
+        </div>
+
+        <div class="form-group">
+            <label>更新提醒</label>
+            <p class="form-help" style="margin-top: 0;">
+                上次更新时间:
+                <strong>{{ group_qr_updated_at|format_datetime if group_qr_updated_at else '未上传' }}</strong>
+            </p>
+            <p class="form-help" style="margin-top: 0.25rem;">
+                下次建议更新时间:
+                <strong>{{ group_qr_next_update_at|format_datetime if group_qr_next_update_at else '上传后自动计算（7天）' }}</strong>
+            </p>
+        </div>
+
+        {% if group_qr_url %}
+        <div class="form-group">
+            <label>当前二维码预览</label>
+            <div
+                style="display: inline-block; padding: 10px; background: #fff; border: 1px solid var(--border-base); border-radius: 10px;">
+                <img src="{{ group_qr_url }}" alt="群邀请二维码" style="width: 220px; max-width: 100%; display: block;">
+            </div>
+        </div>
+        {% endif %}
+
+        <button type="submit" class="btn btn-primary">上传并更新二维码</button>
+    </form>
+</div>
+
 <!-- Webhook 配置 -->
 <div class="content-section">
     <div class="section-header">
@@ -130,11 +177,26 @@
         margin-bottom: 0.5rem;
     }
 
-    .form-help {
-        font-size: 0.8125rem;
-        color: var(--text-muted);
-        margin-top: 0.375rem;
-    }
+.form-help {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    margin-top: 0.375rem;
+}
+
+.settings-top-reminder {
+    padding: 0.75rem 0.9rem;
+    border: 1px solid #bfdbfe;
+    background: #eff6ff;
+    color: #1d4ed8;
+    border-radius: 10px;
+    font-size: 0.9rem;
+}
+
+.settings-top-reminder.is-overdue {
+    border-color: #fecaca;
+    background: #fef2f2;
+    color: #b91c1c;
+}
 </style>
 {% endblock %}
 
@@ -241,6 +303,38 @@
                 showToast('日志级别已保存', 'success');
             } else {
                 showToast(data.error || '保存失败', 'error');
+            }
+        } catch (error) {
+            showToast('网络错误', 'error');
+        }
+    });
+
+    // 群二维码上传表单
+    document.getElementById('groupQrForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const fileInput = document.getElementById('groupQrFile');
+        if (!fileInput.files || fileInput.files.length === 0) {
+            showToast('请先选择二维码图片', 'error');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+
+        try {
+            const response = await fetch('/admin/settings/group-qr', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                showToast('群二维码已更新', 'success');
+                setTimeout(() => location.reload(), 800);
+            } else {
+                showToast(data.error || '上传失败', 'error');
             }
         } catch (error) {
             showToast('网络错误', 'error');

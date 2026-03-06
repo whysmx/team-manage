@@ -58,6 +58,7 @@ class RedeemResponse(BaseModel):
     success: bool
     message: Optional[str] = None
     team_info: Optional[Dict[str, Any]] = None
+    group_qr_url: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -151,10 +152,22 @@ async def confirm_redeem(
                     detail=error_msg
                 )
 
+        group_qr_url = None
+        try:
+            from app.services.settings import settings_service
+
+            group_qr_path = await settings_service.get_setting(db, "group_qr_path", "")
+            group_qr_version = await settings_service.get_setting(db, "group_qr_version", "")
+            if group_qr_path:
+                group_qr_url = f"{group_qr_path}?v={group_qr_version}" if group_qr_version else group_qr_path
+        except Exception as qr_err:
+            logger.warning(f"读取群二维码配置失败，跳过返回二维码: {qr_err}")
+
         return RedeemResponse(
             success=result.get("success", False),
             message=result.get("message"),
             team_info=result.get("team_info"),
+            group_qr_url=group_qr_url,
             error=result.get("error")
         )
 

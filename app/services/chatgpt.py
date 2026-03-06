@@ -135,21 +135,23 @@ class ChatGPTService:
                     error_code = None
                     try:
                         error_data = response.json()
-                        detail = error_data.get("detail", error_msg)
-                        # 确保 error_msg 是字符串，避免前端显示 [object Object]
-                        error_msg = str(detail) if not isinstance(detail, str) else detail
                         if isinstance(error_data, dict):
+                            detail = error_data.get("detail", error_msg)
+                            error_msg = detail
                             error_info = error_data.get("error")
                             error_code = error_info.get("code") if isinstance(error_info, dict) else error_data.get("code")
+                        else:
+                            error_msg = error_data
                     except Exception:
                         pass
-                    
-                    if error_code == "token_invalidated" or "token_invalidated" in str(error_msg).lower():
+
+                    error_msg_text = str(error_msg)
+                    if error_code == "token_invalidated" or "token_invalidated" in error_msg_text.lower():
                         logger.warning(f"检测到 Token 失效，清理会话缓存: {identifier}")
                         await self.clear_session(identifier)
                     
-                    logger.warning(f"客户端错误 {status_code}: {error_msg}")
-                    return {"success": False, "status_code": status_code, "error": error_msg, "error_code": error_code}
+                    logger.warning(f"客户端错误 {status_code}: {error_msg_text}")
+                    return {"success": False, "status_code": status_code, "error": error_msg_text, "error_code": error_code}
 
                 if status_code >= 500:
                     if attempt < self.MAX_RETRIES - 1:

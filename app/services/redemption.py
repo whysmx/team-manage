@@ -38,14 +38,8 @@ class RedemptionService:
         alphabet = string.ascii_uppercase + string.digits
         alphabet = alphabet.replace('0', '').replace('O', '').replace('I', '').replace('1', '')
 
-        # 生成随机码
-        code = ''.join(secrets.choice(alphabet) for _ in range(length))
-
-        # 格式化为 XXXX-XXXX-XXXX-XXXX
-        if length == 16:
-            code = f"{code[0:4]}-{code[4:8]}-{code[8:12]}-{code[12:16]}"
-
-        return code
+        # 生成随机码（不带横杠）
+        return ''.join(secrets.choice(alphabet) for _ in range(length))
 
     async def generate_code_single(
         self,

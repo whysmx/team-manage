@@ -89,9 +89,7 @@ class TeamService:
         if any(kw in error_msg for kw in full_keywords):
             logger.warning(f"检测到 Team 席位已满 (msg={error_msg}), 更新 Team {team.id} ({team.email}) 状态为 full")
             team.status = "full"
-            # 修正当前成员数以防万一
-            if team.current_members < team.max_members:
-                team.current_members = team.max_members
+            # 不根据错误文本推断精确成员数，避免把脏数据写入 current_members
             await db_session.commit()
             return True
 
@@ -419,7 +417,7 @@ class TeamService:
 
                 # 确定状态
                 status = "active"
-                max_members = team.max_members if 'team' in locals() and team else 6
+                max_members = team.max_members if 'team' in locals() and team else 5
                 if current_members >= max_members:
                     status = "full"
                 elif expires_at and expires_at < datetime.now():
@@ -1205,7 +1203,13 @@ class TeamService:
 
             logger.info(f"获取 Team {team_id} 成员列表成功: 共 {len(all_members)} 个成员 (已加入: {members_result['total']})")
 
-            # 6. 请求成功，重置错误状态
+            # 6. 用实时查询结果回写本地成员数，修复历史脏数据/计数漂移
+            actual_total = len(all_members)
+            team.current_members = actual_total
+            if team.status in ["active", "full"]:
+                team.status = "full" if actual_total >= team.max_members else "active"
+
+            # 7. 请求成功，重置错误状态
             await self._reset_error_status(team, db_session)
 
             return {
@@ -1349,7 +1353,7 @@ class TeamService:
                 }
 
             # 2. 检查 Team 状态
-            if team.status == "full":
+            if team.status == "full" or team.current_members >= team.max_members:
                 return {
                     "success": False,
                     "message": None,
@@ -1534,13 +1538,15 @@ class TeamService:
 
     async def get_available_teams(
         self,
-        db_session: AsyncSession
+        db_session: AsyncSession,
+        target_max_members: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         获取可用的 Team 列表 (用于用户兑换页面)
 
         Args:
             db_session: 数据库会话
+            target_max_members: 目标车队最大人数 (可选)
 
         Returns:
             结果字典,包含 success, teams, error
@@ -1551,6 +1557,11 @@ class TeamService:
                 Team.status == "active",
                 Team.current_members < Team.max_members
             )
+            if target_max_members is not None:
+                if target_max_members <= 5:
+                    stmt = stmt.where(Team.max_members <= 5)
+                else:
+                    stmt = stmt.where(Team.max_members > 5)
             result = await db_session.execute(stmt)
             teams = result.scalars().all()
 
@@ -1566,7 +1577,11 @@ class TeamService:
                     "subscription_plan": team.subscription_plan
                 })
 
-            logger.info(f"获取可用 Team 列表成功: 共 {len(team_list)} 个")
+            if target_max_members is not None:
+                pool_desc = "<=5" if target_max_members <= 5 else ">5"
+                logger.info(f"获取可用 Team 列表成功: max_members {pool_desc} 车队, 共 {len(team_list)} 个")
+            else:
+                logger.info(f"获取可用 Team 列表成功: 共 {len(team_list)} 个")
 
             return {
                 "success": True,
