@@ -158,12 +158,10 @@
                                 class="btn btn-sm btn-icon btn-minimal btn-info" title="编辑">
                                 <i data-lucide="edit-3" style="width: 14px; height: 14px;"></i>
                             </button>
-                            {% if code.status == 'unused' %}
                             <button onclick="deleteCode('{{ code.code }}')"
                                 class="btn btn-sm btn-icon btn-minimal btn-danger" title="删除">
                                 <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
                             </button>
-                            {% endif %}
                         </div>
                     </td>
                 </tr>
