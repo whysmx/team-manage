@@ -101,6 +101,11 @@ def run_auto_migration():
             logger.info("添加 teams.account_role 字段")
             cursor.execute("ALTER TABLE teams ADD COLUMN account_role VARCHAR(50)")
             migrations_applied.append("teams.account_role")
+
+        if not column_exists(cursor, "teams", "pending_members"):
+            logger.info("添加 teams.pending_members 字段")
+            cursor.execute("ALTER TABLE teams ADD COLUMN pending_members INTEGER DEFAULT 0")
+            migrations_applied.append("teams.pending_members")
         
         # 提交更改
         conn.commit()

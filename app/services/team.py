@@ -398,11 +398,9 @@ class TeamService:
                     db_session
                 )
 
-                current_members = 0
-                if members_result["success"]:
-                    current_members += members_result["total"]
-                if invites_result["success"]:
-                    current_members += invites_result["total"]
+                joined_members = members_result["total"] if members_result["success"] else 0
+                pending_members = invites_result["total"] if invites_result["success"] else 0
+                current_members = joined_members + pending_members
 
                 # 解析过期时间
                 expires_at = None
@@ -442,6 +440,7 @@ class TeamService:
                     subscription_plan=selected_account["subscription_plan"],
                     expires_at=expires_at,
                     current_members=current_members,
+                    pending_members=pending_members,
                     max_members=max_members,
                     status=status,
                     account_role=selected_account.get("account_user_role"),
@@ -920,15 +919,19 @@ class TeamService:
             )
 
             all_member_emails = set()
+            joined_members = 0
+            pending_members = 0
             current_members = 0
             if members_result["success"]:
-                current_members += members_result["total"]
+                joined_members = members_result["total"]
+                current_members += joined_members
                 for m in members_result.get("members", []):
                     if m.get("email"):
                         all_member_emails.add(m["email"].lower())
             
             if invites_result["success"]:
-                current_members += invites_result["total"]
+                pending_members = invites_result["total"]
+                current_members += pending_members
                 for inv in invites_result.get("items", []):
                     if inv.get("email_address"):
                         all_member_emails.add(inv["email_address"].lower())
@@ -984,6 +987,7 @@ class TeamService:
             team.account_role = current_account.get("account_user_role")
             team.expires_at = expires_at
             team.current_members = current_members
+            team.pending_members = pending_members
             team.status = status
             team.error_count = 0  # 同步成功，重置错误次数
             team.last_sync = get_now()
@@ -1206,6 +1210,7 @@ class TeamService:
             # 6. 用实时查询结果回写本地成员数，修复历史脏数据/计数漂移
             actual_total = len(all_members)
             team.current_members = actual_total
+            team.pending_members = invites_result["total"] if invites_result["success"] else 0
             if team.status in ["active", "full"]:
                 team.status = "full" if actual_total >= team.max_members else "active"
 
@@ -1568,10 +1573,14 @@ class TeamService:
             # 构建返回数据 (不包含敏感信息)
             team_list = []
             for team in teams:
+                pending_members = team.pending_members or 0
+                joined_members = max((team.current_members or 0) - pending_members, 0)
                 team_list.append({
                     "id": team.id,
                     "team_name": team.team_name,
                     "current_members": team.current_members,
+                    "pending_members": pending_members,
+                    "joined_members": joined_members,
                     "max_members": team.max_members,
                     "expires_at": team.expires_at.isoformat() if team.expires_at else None,
                     "subscription_plan": team.subscription_plan
@@ -1690,6 +1699,8 @@ class TeamService:
                 "subscription_plan": team.subscription_plan,
                 "expires_at": team.expires_at.isoformat() if team.expires_at else None,
                 "current_members": team.current_members,
+                "pending_members": team.pending_members or 0,
+                "joined_members": max((team.current_members or 0) - (team.pending_members or 0), 0),
                 "max_members": team.max_members,
                 "status": team.status,
                 "last_sync": team.last_sync.isoformat() if team.last_sync else None,
@@ -1782,6 +1793,8 @@ class TeamService:
             # 构建返回数据
             team_list = []
             for team in teams:
+                pending_members = team.pending_members or 0
+                joined_members = max((team.current_members or 0) - pending_members, 0)
                 team_list.append({
                     "id": team.id,
                     "email": team.email,
@@ -1791,6 +1804,8 @@ class TeamService:
                     "subscription_plan": team.subscription_plan,
                     "expires_at": team.expires_at.isoformat() if team.expires_at else None,
                     "current_members": team.current_members,
+                    "pending_members": pending_members,
+                    "joined_members": joined_members,
                     "max_members": team.max_members,
                     "status": team.status,
                     "last_sync": team.last_sync.isoformat() if team.last_sync else None,

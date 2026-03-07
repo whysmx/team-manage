@@ -84,7 +84,7 @@
 </div>
 
 <!-- 兑换码列表 -->
-<div class="content-section">
+<div class="content-section table-wide-section">
     {% if codes %}
     <div class="table-container">
         <table class="data-table">
@@ -348,6 +348,22 @@
 
 {% block extra_css %}
 <style>
+    @media (min-width: 1280px) {
+        .main-container {
+            max-width: min(1720px, 96vw);
+        }
+
+        .main-content {
+            padding-left: 2rem;
+            padding-right: 2rem;
+        }
+
+        .table-wide-section {
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+    }
+
     .bulk-action-bar {
         position: fixed;
         bottom: 2rem;

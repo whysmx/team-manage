@@ -79,7 +79,7 @@
                     <th>邮箱</th>
                     <th>Account ID</th>
                     <th>Team 名称</th>
-                    <th>成员数</th>
+                    <th>成员数(已加入/待加入/最大)</th>
                     <th>订阅计划</th>
                     <th>到期时间</th>
                     <th>状态</th>
@@ -100,7 +100,7 @@
                     <td>{{ team.team_name or '-' }}</td>
                     <td>
                         <span class="member-count">
-                            {{ team.current_members }}/{{ team.max_members }}
+                            {{ team.joined_members }}/{{ team.pending_members }}/{{ team.max_members }}
                         </span>
                     </td>
                     <td>{{ team.subscription_plan or '-' }}</td>

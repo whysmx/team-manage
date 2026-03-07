@@ -82,7 +82,7 @@
 </div>
 
 <!-- 使用记录列表 -->
-<div class="content-section">
+<div class="content-section table-wide-section">
     <div class="section-header">
         <div style="display: flex; align-items: center; gap: 1rem;">
             <h3>使用记录列表</h3>
@@ -246,6 +246,22 @@
 
 {% block extra_css %}
 <style>
+    @media (min-width: 1280px) {
+        .main-container {
+            max-width: min(1720px, 96vw);
+        }
+
+        .main-content {
+            padding-left: 2rem;
+            padding-right: 2rem;
+        }
+
+        .table-wide-section {
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+    }
+
     .spin {
         animation: spin 1s linear infinite;
     }
