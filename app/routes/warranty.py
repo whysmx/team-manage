@@ -3,12 +3,13 @@
 处理用户质保查询请求
 """
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.services.warranty import warranty_service
+from app.utils.email_input import normalize_email_input
 
 router = APIRouter(
     prefix="/warranty",
@@ -18,7 +19,7 @@ router = APIRouter(
 
 class WarrantyCheckRequest(BaseModel):
     """质保查询请求"""
-    email: Optional[EmailStr] = None
+    email: Optional[str] = None
     code: Optional[str] = None
 
 
@@ -62,8 +63,9 @@ async def check_warranty(
     用户可以通过邮箱或兑换码查询质保状态
     """
     try:
+        normalized_email = normalize_email_input(request.email, field_label="邮箱")
         # 验证至少提供一个参数
-        if not request.email and not request.code:
+        if not normalized_email and not request.code:
             raise HTTPException(
                 status_code=400,
                 detail="必须提供邮箱或兑换码"
@@ -72,7 +74,7 @@ async def check_warranty(
         # 调用质保服务
         result = await warranty_service.check_warranty_status(
             db_session,
-            email=request.email,
+            email=normalized_email,
             code=request.code
         )
         
@@ -97,6 +99,11 @@ async def check_warranty(
         
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
     except Exception as e:
         raise HTTPException(
             status_code=500,

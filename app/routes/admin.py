@@ -10,13 +10,14 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFi
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 import json
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field
 
 from app.database import get_db
 from app.dependencies.auth import require_admin
 from app.services.team import TeamService
 from app.services.redemption import RedemptionService
 from app.services.email_import import email_import_service
+from app.utils.email_input import normalize_email_input
 from app.utils.time_utils import get_now
 
 logger = logging.getLogger(__name__)
@@ -52,8 +53,18 @@ class TeamImportRequest(BaseModel):
 
 class TeamImportByEmailRequest(BaseModel):
     """邮箱导入请求"""
-    email: EmailStr = Field(..., description="邮箱")
+    email: str = Field(..., description="邮箱")
     account_id: Optional[str] = Field(None, description="Account ID (可选)")
+
+
+class TeamUpsertRequest(BaseModel):
+    """Team 同步请求（新增或更新）"""
+    access_token: Optional[str] = Field(None, description="AT Token")
+    refresh_token: Optional[str] = Field(None, description="Refresh Token")
+    session_token: Optional[str] = Field(None, description="Session Token")
+    client_id: Optional[str] = Field(None, description="Client ID")
+    email: Optional[str] = Field(None, description="邮箱")
+    account_id: Optional[str] = Field(None, description="Account ID")
 
 
 class AddMemberRequest(BaseModel):
@@ -232,10 +243,11 @@ async def update_team(
 ):
     """更新 Team 信息"""
     try:
+        normalized_email = normalize_email_input(update_data.email, field_label="邮箱")
         result = await team_service.update_team(
             team_id=team_id,
             db_session=db,
-            email=update_data.email,
+            email=normalized_email,
             account_id=update_data.account_id,
             access_token=update_data.access_token,
             refresh_token=update_data.refresh_token,
@@ -251,6 +263,11 @@ async def update_team(
                 content=result
             )
         return JSONResponse(content=result)
+    except ValueError as e:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"success": False, "error": str(e)}
+        )
     except Exception as e:
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -279,6 +296,7 @@ async def team_import(
     """
     try:
         logger.info(f"管理员导入 Team: {import_data.import_type}")
+        normalized_email = normalize_email_input(import_data.email, field_label="邮箱")
 
         if import_data.import_type == "single":
             # 单个导入 - 允许通过 AT, RT 或 ST 导入
@@ -294,7 +312,7 @@ async def team_import(
             result = await team_service.import_team_single(
                 access_token=import_data.access_token,
                 db_session=db,
-                email=import_data.email,
+                email=normalized_email,
                 account_id=import_data.account_id,
                 refresh_token=import_data.refresh_token,
                 session_token=import_data.session_token,
@@ -332,6 +350,14 @@ async def team_import(
                 }
             )
 
+    except ValueError as e:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "success": False,
+                "error": str(e)
+            }
+        )
     except Exception as e:
         logger.error(f"导入 Team 失败: {e}")
         return JSONResponse(
@@ -339,6 +365,60 @@ async def team_import(
             content={
                 "success": False,
                 "error": f"导入失败: {str(e)}"
+            }
+        )
+
+
+@router.post("/teams/upsert")
+async def team_upsert(
+    upsert_data: TeamUpsertRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    同步 Team：不存在则导入，存在则更新 Token。
+    """
+    try:
+        normalized_email = normalize_email_input(upsert_data.email, field_label="邮箱")
+        if not any([upsert_data.access_token, upsert_data.refresh_token, upsert_data.session_token]):
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={
+                    "success": False,
+                    "error": "必须提供 Access Token、Refresh Token 或 Session Token 其中之一"
+                }
+            )
+
+        result = await team_service.upsert_team_single(
+            access_token=upsert_data.access_token,
+            db_session=db,
+            email=normalized_email,
+            account_id=upsert_data.account_id,
+            refresh_token=upsert_data.refresh_token,
+            session_token=upsert_data.session_token,
+            client_id=upsert_data.client_id,
+        )
+        if not result.get("success"):
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=result
+            )
+        return JSONResponse(content=result)
+    except ValueError as e:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "success": False,
+                "error": str(e)
+            }
+        )
+    except Exception as e:
+        logger.error(f"同步 Team 失败: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "success": False,
+                "error": f"同步失败: {str(e)}"
             }
         )
 
@@ -353,10 +433,11 @@ async def team_import_by_email(
     通过邮箱验证码流程提取 AT，并导入 Team（单条手动触发）
     """
     try:
-        logger.info(f"管理员触发邮箱导入 Team: {import_data.email}")
+        normalized_email = normalize_email_input(import_data.email, required=True, field_label="邮箱")
+        logger.info(f"管理员触发邮箱导入 Team: {normalized_email}")
 
         result = await email_import_service.extract_at_and_import_team(
-            email=str(import_data.email),
+            email=normalized_email,
             db_session=db,
             account_id=import_data.account_id
         )
@@ -369,6 +450,14 @@ async def team_import_by_email(
 
         return JSONResponse(content=result)
 
+    except ValueError as e:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "success": False,
+                "error": str(e)
+            }
+        )
     except Exception as e:
         logger.error(f"邮箱导入 Team 失败: {e}", exc_info=True)
         return JSONResponse(
@@ -432,11 +521,12 @@ async def add_team_member(
         添加结果
     """
     try:
-        logger.info(f"管理员添加成员到 Team {team_id}: {member_data.email}")
+        normalized_email = normalize_email_input(member_data.email, required=True, field_label="成员邮箱")
+        logger.info(f"管理员添加成员到 Team {team_id}: {normalized_email}")
 
         result = await team_service.add_team_member(
             team_id=team_id,
-            email=member_data.email,
+            email=normalized_email,
             db_session=db
         )
 
@@ -448,6 +538,14 @@ async def add_team_member(
 
         return JSONResponse(content=result)
 
+    except ValueError as e:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "success": False,
+                "error": str(e)
+            }
+        )
     except Exception as e:
         logger.error(f"添加成员失败: {e}")
         return JSONResponse(
@@ -526,11 +624,12 @@ async def revoke_team_invite(
         撤回结果
     """
     try:
-        logger.info(f"管理员从 Team {team_id} 撤回邀请: {member_data.email}")
+        normalized_email = normalize_email_input(member_data.email, required=True, field_label="成员邮箱")
+        logger.info(f"管理员从 Team {team_id} 撤回邀请: {normalized_email}")
 
         result = await team_service.revoke_team_invite(
             team_id=team_id,
-            email=member_data.email,
+            email=normalized_email,
             db_session=db
         )
 
@@ -542,6 +641,14 @@ async def revoke_team_invite(
 
         return JSONResponse(content=result)
 
+    except ValueError as e:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "success": False,
+                "error": str(e)
+            }
+        )
     except Exception as e:
         logger.error(f"撤回邀请失败: {e}")
         return JSONResponse(

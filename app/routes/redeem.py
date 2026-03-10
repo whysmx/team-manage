@@ -4,12 +4,13 @@
 """
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.services.redeem_flow import redeem_flow_service
+from app.utils.email_input import normalize_email_input
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ class VerifyCodeRequest(BaseModel):
 
 class RedeemRequest(BaseModel):
     """兑换请求"""
-    email: EmailStr = Field(..., description="用户邮箱")
+    email: str = Field(..., description="用户邮箱")
     code: str = Field(..., description="兑换码", min_length=1)
     team_id: Optional[int] = Field(None, description="Team ID (可选，不提供则自动选择)")
 
@@ -125,10 +126,11 @@ async def confirm_redeem(
         兑换结果
     """
     try:
-        logger.info(f"兑换请求: {request.email} -> Team {request.team_id} (兑换码: {request.code})")
+        normalized_email = normalize_email_input(request.email, required=True, field_label="邮箱")
+        logger.info(f"兑换请求: {normalized_email} -> Team {request.team_id} (兑换码: {request.code})")
 
         result = await redeem_flow_service.redeem_and_join_team(
-            request.email,
+            normalized_email,
             request.code,
             request.team_id,
             db
@@ -173,6 +175,11 @@ async def confirm_redeem(
 
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
         logger.error(f"兑换失败: {e}")
         raise HTTPException(

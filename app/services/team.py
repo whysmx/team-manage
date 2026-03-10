@@ -39,6 +39,10 @@ class TeamService:
         """
         error_code = result.get("error_code")
         error_msg = str(result.get("error", "")).lower()
+
+        if error_code == "invalid_invite_email":
+            logger.info("检测到邀请邮箱格式不被下游接口接受，跳过 Team 状态惩罚")
+            return False
         
         # 1. 判定是否为“封号/永久失效”类致命错误
         # 明确的错误码匹配
@@ -507,6 +511,168 @@ class TeamService:
                 "message": None,
                 "error": f"导入失败: {str(e)}"
             }
+
+    async def _update_existing_teams_for_sync(
+        self,
+        db_session: AsyncSession,
+        access_token: Optional[str],
+        email: Optional[str] = None,
+        account_id: Optional[str] = None,
+        refresh_token: Optional[str] = None,
+        session_token: Optional[str] = None,
+        client_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        按 account_id 或 email 更新已有 Team 的 Token 信息（用于外部同步）。
+        """
+        try:
+            candidates: List[Team] = []
+
+            if account_id:
+                stmt = select(Team).where(Team.account_id == account_id)
+                result = await db_session.execute(stmt)
+                candidates = result.scalars().all()
+
+            if not candidates and email:
+                stmt = select(Team).where(Team.email == email)
+                result = await db_session.execute(stmt)
+                candidates = result.scalars().all()
+
+            if not candidates:
+                return {
+                    "success": False,
+                    "updated_count": 0,
+                    "updated_ids": [],
+                    "error": "未找到可更新的 Team 记录",
+                }
+
+            updated_ids: List[int] = []
+            failed_items: List[str] = []
+
+            for team in candidates:
+                status_to_set = "active" if team.status in ["expired", "error"] else None
+                update_result = await self.update_team(
+                    team_id=team.id,
+                    db_session=db_session,
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                    session_token=session_token,
+                    client_id=client_id,
+                    email=email,
+                    status=status_to_set,
+                )
+                if update_result.get("success"):
+                    updated_ids.append(team.id)
+                else:
+                    failed_items.append(f"Team {team.id}: {update_result.get('error', '未知错误')}")
+
+            if not updated_ids:
+                return {
+                    "success": False,
+                    "updated_count": 0,
+                    "updated_ids": [],
+                    "error": "；".join(failed_items) if failed_items else "更新失败",
+                }
+
+            message = f"已更新 {len(updated_ids)} 个已存在 Team"
+            if failed_items:
+                message += f"，另有 {len(failed_items)} 个更新失败"
+
+            return {
+                "success": True,
+                "updated_count": len(updated_ids),
+                "updated_ids": updated_ids,
+                "message": message,
+                "error": None,
+            }
+        except Exception as e:
+            logger.error(f"更新已有 Team 失败: {e}")
+            return {
+                "success": False,
+                "updated_count": 0,
+                "updated_ids": [],
+                "error": f"更新已有 Team 失败: {str(e)}",
+            }
+
+    async def upsert_team_single(
+        self,
+        access_token: Optional[str],
+        db_session: AsyncSession,
+        email: Optional[str] = None,
+        account_id: Optional[str] = None,
+        refresh_token: Optional[str] = None,
+        session_token: Optional[str] = None,
+        client_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        外部同步入口：先尝试导入，若账号已存在则更新 AT/ST。
+        """
+        import_result = await self.import_team_single(
+            access_token=access_token,
+            db_session=db_session,
+            email=email,
+            account_id=account_id,
+            refresh_token=refresh_token,
+            session_token=session_token,
+            client_id=client_id,
+        )
+
+        final_email = import_result.get("email") or email
+
+        if import_result.get("success"):
+            import_message = str(import_result.get("message") or "")
+            # 仅当导入结果里出现“已存在”提示时，补一轮更新，保证同邮箱旧记录也拿到新 Token。
+            if "已存在" in import_message:
+                update_result = await self._update_existing_teams_for_sync(
+                    db_session=db_session,
+                    access_token=access_token,
+                    email=final_email,
+                    account_id=account_id,
+                    refresh_token=refresh_token,
+                    session_token=session_token,
+                    client_id=client_id,
+                )
+                if update_result.get("success"):
+                    return {
+                        "success": True,
+                        "team_id": import_result.get("team_id"),
+                        "email": final_email,
+                        "message": f"{import_message}；{update_result.get('message')}",
+                        "error": None,
+                    }
+            return import_result
+
+        error_text = str(import_result.get("error") or "")
+        already_exists = "已在系统中" in error_text or "已存在" in error_text
+        if not already_exists:
+            return import_result
+
+        update_result = await self._update_existing_teams_for_sync(
+            db_session=db_session,
+            access_token=access_token,
+            email=final_email,
+            account_id=account_id,
+            refresh_token=refresh_token,
+            session_token=session_token,
+            client_id=client_id,
+        )
+        if not update_result.get("success"):
+            return {
+                "success": False,
+                "team_id": None,
+                "email": final_email,
+                "message": None,
+                "error": update_result.get("error") or error_text or "同步失败",
+            }
+
+        updated_ids = update_result.get("updated_ids") or []
+        return {
+            "success": True,
+            "team_id": updated_ids[0] if updated_ids else None,
+            "email": final_email,
+            "message": update_result.get("message") or "已更新已有 Team",
+            "error": None,
+        }
 
 
     async def update_team(

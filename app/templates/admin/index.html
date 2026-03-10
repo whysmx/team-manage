@@ -79,7 +79,7 @@
                     <th>邮箱</th>
                     <th>Account ID</th>
                     <th>Team 名称</th>
-                    <th>成员数(已加入/待加入/最大)</th>
+                    <th>已入/待入/最大</th>
                     <th>订阅计划</th>
                     <th>到期时间</th>
                     <th>状态</th>
@@ -263,7 +263,7 @@
                 <input type="hidden" id="edit-team-id" name="teamId">
                 <div class="form-group">
                     <label>邮箱 <span class="required">*</span></label>
-                    <input type="email" id="edit-team-email" name="email" class="form-control" required>
+                    <input type="text" inputmode="email" autocomplete="email" id="edit-team-email" name="email" class="form-control" required>
                 </div>
                 <div class="form-group">
                     <label>Access Token (AT) <span class="required">*</span></label>
@@ -372,7 +372,7 @@
 
         try {
             showToast('正在刷新...', 'info');
-            const response = await fetch(`/api/teams/${teamId}/refresh?force=true`, {
+            const response = await fetch(`/api/teams/${teamId}/refresh`, {
                 method: 'GET'
             });
 

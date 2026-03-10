@@ -514,6 +514,8 @@ class RedeemFlowService:
                     await self._rollback_redemption(db_session, code, team_id_final, email=email)
                     
                     error_msg = invite_result.get("error", "未知错误")
+                    if invite_result.get("error_code") == "invalid_invite_email":
+                        return {"success": False, "error": f"加入失败: {error_msg}"}
                     
                     # 重新查询 Team 以获取最新状态（尤其是错误计数和状态）
                     stmt = select(Team).where(Team.id == team_id_final)

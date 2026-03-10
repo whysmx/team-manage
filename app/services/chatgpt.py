@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any, List
 from curl_cffi.requests import AsyncSession
 from app.services.settings import settings_service
 from sqlalchemy.ext.asyncio import AsyncSession as DBAsyncSession
+from app.utils.email_input import normalize_invite_email_input
 from app.utils.jwt_parser import JWTParser
 
 logger = logging.getLogger(__name__)
@@ -137,9 +138,14 @@ class ChatGPTService:
                         error_data = response.json()
                         if isinstance(error_data, dict):
                             detail = error_data.get("detail", error_msg)
-                            error_msg = detail
+                            if isinstance(detail, list):
+                                error_msg = self._format_validation_errors(detail)
+                            else:
+                                error_msg = detail
                             error_info = error_data.get("error")
                             error_code = error_info.get("code") if isinstance(error_info, dict) else error_data.get("code")
+                        elif isinstance(error_data, list):
+                            error_msg = self._format_validation_errors(error_data)
                         else:
                             error_msg = error_data
                     except Exception:
@@ -166,6 +172,25 @@ class ChatGPTService:
 
         return {"success": False, "status_code": 0, "error": "未知错误"}
 
+    @staticmethod
+    def _format_validation_errors(error_data: List[Any]) -> str:
+        """Format list-style validation errors returned by downstream APIs."""
+        messages: List[str] = []
+        for item in error_data:
+            if not isinstance(item, dict):
+                continue
+
+            loc = item.get("loc") or []
+            msg = str(item.get("msg") or "").strip()
+            if len(loc) >= 2 and loc[0] == "body" and loc[1] == "email_addresses":
+                messages.append("邀请邮箱不被 ChatGPT 接口接受，@ 后域名必须包含 .")
+                continue
+
+            if msg:
+                messages.append(msg)
+
+        return "；".join(dict.fromkeys(messages)) if messages else str(error_data)
+
     async def send_invite(
         self,
         access_token: str,
@@ -175,13 +200,18 @@ class ChatGPTService:
         identifier: str = "default"
     ) -> Dict[str, Any]:
         """发送 Team 邀请"""
+        try:
+            invite_email = normalize_invite_email_input(email, field_label="邀请邮箱")
+        except ValueError as e:
+            return {"success": False, "status_code": 400, "error": str(e), "error_code": "invalid_invite_email"}
+
         url = f"{self.BASE_URL}/accounts/{account_id}/invites"
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {access_token}",
             "chatgpt-account-id": account_id
         }
-        json_data = {"email_addresses": [email], "role": "standard-user", "resend_emails": True}
+        json_data = {"email_addresses": [invite_email], "role": "standard-user", "resend_emails": True}
         return await self._make_request("POST", url, headers, json_data, db_session, identifier)
 
     async def get_members(
