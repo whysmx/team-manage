@@ -12,7 +12,6 @@ from app.database import get_db
 from app.models import RedemptionCode
 
 logger = logging.getLogger(__name__)
-BASE_SERVED_COUNT = 500
 
 # 创建路由器
 router = APIRouter(
@@ -46,8 +45,15 @@ async def redeem_page(
         )
         used_codes_result = await db.execute(used_codes_stmt)
         used_codes_count = used_codes_result.scalar() or 0
-        served_count = BASE_SERVED_COUNT + used_codes_count
+        served_count = used_codes_count
+        redeem_css_version = ""
         redeem_js_version = ""
+        try:
+            redeem_css_path = Path(__file__).resolve().parents[1] / "static" / "css" / "user.css"
+            redeem_css_version = str(int(redeem_css_path.stat().st_mtime))
+        except Exception:
+            redeem_css_version = ""
+
         try:
             redeem_js_path = Path(__file__).resolve().parents[1] / "static" / "js" / "redeem.js"
             redeem_js_version = str(int(redeem_js_path.stat().st_mtime))
@@ -63,6 +69,7 @@ async def redeem_page(
                 "request": request,
                 "remaining_spots": remaining_spots,
                 "served_count": served_count,
+                "redeem_css_version": redeem_css_version,
                 "redeem_js_version": redeem_js_version
             }
         )

@@ -20,7 +20,7 @@ from app.utils.time_utils import get_now
 
 logger = logging.getLogger(__name__)
 
-WARRANTY_TEAM_MAX_MEMBERS = 5
+WARRANTY_TEAM_MAX_MEMBERS = 8
 STANDARD_TEAM_MAX_MEMBERS = 10
 
 
@@ -104,7 +104,7 @@ class RedeemFlowService:
                     "error": teams_result["error"]
                 }
 
-            target_pool_desc = "<=5 人车队" if redemption_code.has_warranty else ">5 人车队"
+            target_pool_desc = "质保车队" if redemption_code.has_warranty else "无质保车队"
             logger.info(
                 f"验证兑换码成功: {code}, 目标车队池={target_pool_desc}, 可用 Team 数量: {len(teams_result['teams'])}"
             )
@@ -140,7 +140,7 @@ class RedeemFlowService:
         Args:
             db_session: 数据库会话
             email: 用户邮箱 (用于排除已加入的 Team)
-            target_max_members: 目标车队最大人数 (例如 5=质保池,10=非质保池)
+            target_max_members: 目标车队池标识，用于区分质保池和非质保池
 
         Returns:
             结果字典,包含 success, team_id, error
@@ -180,7 +180,7 @@ class RedeemFlowService:
                 if exclude_team_ids:
                     reason = "您已加入所有可用 Team"
                 if target_max_members is not None:
-                    pool_desc = "<=5 人车队" if target_max_members <= WARRANTY_TEAM_MAX_MEMBERS else ">5 人车队"
+                    pool_desc = "质保车队" if target_max_members <= WARRANTY_TEAM_MAX_MEMBERS else "无质保车队"
                     reason = f"没有可用的 {pool_desc}"
                     if exclude_team_ids:
                         reason = f"您已加入所有可用的 {pool_desc}"
@@ -330,14 +330,14 @@ class RedeemFlowService:
                         return {"success": False, "error": f"Team {team_id_final} 不存在"}
 
                     if is_warranty_code and team.max_members > WARRANTY_TEAM_MAX_MEMBERS:
-                        expected_type_desc = "质保车队(<=5人)"
+                        expected_type_desc = "质保车队"
                         if is_auto_select and attempt < max_retries - 1:
                             logger.warning(f"自动选择到了非质保车队 Team {team_id_final}, 尝试下一次循环")
                             current_target_team_id = None
                             continue
                         return {"success": False, "error": f"兑换码与车队类型不匹配，请选择{expected_type_desc}"}
                     if (not is_warranty_code) and team.max_members <= WARRANTY_TEAM_MAX_MEMBERS:
-                        expected_type_desc = "非质保车队(>5人)"
+                        expected_type_desc = "无质保车队"
                         if is_auto_select and attempt < max_retries - 1:
                             logger.warning(f"自动选择到了质保车队 Team {team_id_final}, 尝试下一次循环")
                             current_target_team_id = None

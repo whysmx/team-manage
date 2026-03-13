@@ -46,6 +46,8 @@ class WarrantyService:
             banned_teams, can_reuse, original_code, error
         """
         try:
+            code_exists = False
+
             if not email and not code:
                 return {
                     "success": False,
@@ -79,6 +81,7 @@ class WarrantyService:
                 result = await db_session.execute(stmt)
                 first_record = result.first()
                 if first_record:
+                    code_exists = True
                     records_data = [first_record]
                 else:
                     records_data = []
@@ -92,6 +95,7 @@ class WarrantyService:
                     if not redemption_code_obj:
                         return {
                             "success": True,
+                            "code_exists": False,
                             "has_warranty": False,
                             "warranty_valid": False,
                             "warranty_expires_at": None,
@@ -103,8 +107,10 @@ class WarrantyService:
                         }
                     
                     # 只有码没有记录的情况
+                    code_exists = True
                     return {
                         "success": True,
+                        "code_exists": True,
                         "has_warranty": redemption_code_obj.has_warranty,
                         "warranty_valid": True if not redemption_code_obj.warranty_expires_at or redemption_code_obj.warranty_expires_at > get_now() else False,
                         "warranty_expires_at": redemption_code_obj.warranty_expires_at.isoformat() if redemption_code_obj.warranty_expires_at else None,
@@ -151,6 +157,7 @@ class WarrantyService:
             if not records_data:
                 return {
                     "success": True,
+                    "code_exists": False,
                     "has_warranty": False,
                     "warranty_valid": False,
                     "warranty_expires_at": None,
@@ -236,6 +243,7 @@ class WarrantyService:
 
             return {
                 "success": True,
+                "code_exists": code_exists,
                 "has_warranty": has_any_warranty,
                 "warranty_valid": primary_warranty_valid,
                 "warranty_expires_at": primary_expiry.isoformat() if primary_expiry else None,

@@ -16,8 +16,11 @@ from app.services.encryption import encryption_service
 from app.utils.token_parser import TokenParser
 from app.utils.jwt_parser import JWTParser
 from app.utils.time_utils import get_now
+from app.database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
+
+WARRANTY_TEAM_MAX_MEMBERS = 8
 
 
 class TeamService:
@@ -1729,10 +1732,10 @@ class TeamService:
                 Team.current_members < Team.max_members
             )
             if target_max_members is not None:
-                if target_max_members <= 5:
-                    stmt = stmt.where(Team.max_members <= 5)
+                if target_max_members <= WARRANTY_TEAM_MAX_MEMBERS:
+                    stmt = stmt.where(Team.max_members <= WARRANTY_TEAM_MAX_MEMBERS)
                 else:
-                    stmt = stmt.where(Team.max_members > 5)
+                    stmt = stmt.where(Team.max_members > WARRANTY_TEAM_MAX_MEMBERS)
             result = await db_session.execute(stmt)
             teams = result.scalars().all()
 
@@ -1753,8 +1756,8 @@ class TeamService:
                 })
 
             if target_max_members is not None:
-                pool_desc = "<=5" if target_max_members <= 5 else ">5"
-                logger.info(f"获取可用 Team 列表成功: max_members {pool_desc} 车队, 共 {len(team_list)} 个")
+                pool_desc = "质保车队" if target_max_members <= WARRANTY_TEAM_MAX_MEMBERS else "无质保车队"
+                logger.info(f"获取可用 Team 列表成功: {pool_desc}, 共 {len(team_list)} 个")
             else:
                 logger.info(f"获取可用 Team 列表成功: 共 {len(team_list)} 个")
 
@@ -1995,6 +1998,243 @@ class TeamService:
                 "success": False,
                 "teams": [],
                 "error": f"获取所有 Team 列表失败: {str(e)}"
+            }
+
+    async def find_member_teams_by_email(
+        self,
+        email: str,
+        db_session: AsyncSession,
+        concurrency: int = 4
+    ) -> Dict[str, Any]:
+        """
+        跨所有 Team 反查成员邮箱所在车队。
+
+        说明:
+            - 该查询依赖实时调用 ChatGPT Team 成员/邀请接口，不依赖兑换记录。
+            - 为了控制扫描耗时，会以有限并发执行。
+        """
+        try:
+            target_email = email.strip().lower()
+            if not target_email:
+                return {
+                    "success": False,
+                    "email": email,
+                    "matches": [],
+                    "scanned_teams": 0,
+                    "failed_teams": 0,
+                    "message": None,
+                    "error": "邮箱不能为空"
+                }
+
+            stmt = (
+                select(Team)
+                .where(
+                    Team.account_id.is_not(None),
+                    Team.access_token_encrypted.is_not(None)
+                )
+                .order_by(Team.id.desc())
+            )
+            result = await db_session.execute(stmt)
+            teams = result.scalars().all()
+
+            if not teams:
+                return {
+                    "success": True,
+                    "email": target_email,
+                    "matches": [],
+                    "scanned_teams": 0,
+                    "failed_teams": 0,
+                    "message": "当前没有可扫描的 Team",
+                    "error": None
+                }
+
+            team_candidates = []
+            for team in teams:
+                team_candidates.append({
+                    "id": team.id,
+                    "email": team.email,
+                    "team_name": team.team_name,
+                    "status": team.status,
+                    "account_id": team.account_id,
+                    "current_members": team.current_members or 0,
+                    "pending_members": team.pending_members or 0,
+                    "max_members": team.max_members or 5,
+                })
+
+            semaphore = asyncio.Semaphore(max(1, min(concurrency, 10)))
+
+            async def inspect_team(team_info: Dict[str, Any]) -> Dict[str, Any]:
+                async with semaphore:
+                    try:
+                        async with AsyncSessionLocal() as session:
+                            team = await session.get(Team, team_info["id"])
+                            if not team or not team.account_id:
+                                return {
+                                    "team_id": team_info["id"],
+                                    "match": None,
+                                    "error": "Team 不存在或缺少 account_id"
+                                }
+
+                            access_token = await self.ensure_access_token(team, session)
+                            if not access_token:
+                                return {
+                                    "team_id": team.id,
+                                    "match": None,
+                                    "error": "Token 已过期且无法刷新"
+                                }
+
+                            members_result = await self.chatgpt_service.get_members(
+                                access_token,
+                                team.account_id,
+                                session,
+                                identifier=team.email
+                            )
+                            if not members_result["success"]:
+                                return {
+                                    "team_id": team.id,
+                                    "match": None,
+                                    "error": f"获取成员失败: {members_result['error']}"
+                                }
+
+                            joined_member = next(
+                                (
+                                    member for member in members_result["members"]
+                                    if (member.get("email") or "").strip().lower() == target_email
+                                ),
+                                None
+                            )
+                            if joined_member:
+                                return {
+                                    "team_id": team.id,
+                                    "match": {
+                                        "team_id": team.id,
+                                        "team_email": team.email,
+                                        "team_name": team.team_name,
+                                        "team_status": team.status,
+                                        "account_id": team.account_id,
+                                        "current_members": team.current_members or 0,
+                                        "pending_members": team.pending_members or 0,
+                                        "max_members": team.max_members or 5,
+                                        "member_status": "joined",
+                                        "member_role": joined_member.get("role"),
+                                        "member_name": joined_member.get("name"),
+                                        "added_at": joined_member.get("created_time"),
+                                        "user_id": joined_member.get("id")
+                                    },
+                                    "error": None
+                                }
+
+                            invites_result = await self.chatgpt_service.get_invites(
+                                access_token,
+                                team.account_id,
+                                session,
+                                identifier=team.email
+                            )
+                            if not invites_result["success"]:
+                                return {
+                                    "team_id": team.id,
+                                    "match": None,
+                                    "error": f"获取邀请失败: {invites_result['error']}"
+                                }
+
+                            invited_member = next(
+                                (
+                                    invite for invite in invites_result["items"]
+                                    if (invite.get("email_address") or "").strip().lower() == target_email
+                                ),
+                                None
+                            )
+                            if invited_member:
+                                return {
+                                    "team_id": team.id,
+                                    "match": {
+                                        "team_id": team.id,
+                                        "team_email": team.email,
+                                        "team_name": team.team_name,
+                                        "team_status": team.status,
+                                        "account_id": team.account_id,
+                                        "current_members": team.current_members or 0,
+                                        "pending_members": team.pending_members or 0,
+                                        "max_members": team.max_members or 5,
+                                        "member_status": "invited",
+                                        "member_role": invited_member.get("role"),
+                                        "member_name": None,
+                                        "added_at": invited_member.get("created_time"),
+                                        "user_id": None
+                                    },
+                                    "error": None
+                                }
+
+                            return {
+                                "team_id": team.id,
+                                "match": None,
+                                "error": None
+                            }
+                    except Exception as exc:
+                        logger.error(f"扫描 Team {team_info['id']} 成员失败: {exc}")
+                        return {
+                            "team_id": team_info["id"],
+                            "match": None,
+                            "error": str(exc)
+                        }
+
+            task_results = await asyncio.gather(
+                *(inspect_team(team_info) for team_info in team_candidates),
+                return_exceptions=True
+            )
+
+            matches: List[Dict[str, Any]] = []
+            failures: List[Dict[str, Any]] = []
+
+            for team_info, item in zip(team_candidates, task_results):
+                if isinstance(item, Exception):
+                    failures.append({
+                        "team_id": team_info["id"],
+                        "team_email": team_info["email"],
+                        "error": str(item)
+                    })
+                    continue
+
+                if item.get("match"):
+                    matches.append(item["match"])
+
+                if item.get("error"):
+                    failures.append({
+                        "team_id": team_info["id"],
+                        "team_email": team_info["email"],
+                        "error": item["error"]
+                    })
+
+            matches.sort(
+                key=lambda match: (0 if match["member_status"] == "joined" else 1, -int(match["team_id"]))
+            )
+
+            if matches:
+                message = f"找到 {len(matches)} 个匹配车队"
+            else:
+                message = "未在已导入 Team 中找到该邮箱"
+
+            return {
+                "success": True,
+                "email": target_email,
+                "matches": matches,
+                "scanned_teams": len(team_candidates),
+                "failed_teams": len(failures),
+                "failures": failures[:10],
+                "message": message,
+                "error": None
+            }
+
+        except Exception as e:
+            logger.error(f"按邮箱反查成员所在 Team 失败: {e}")
+            return {
+                "success": False,
+                "email": email,
+                "matches": [],
+                "scanned_teams": 0,
+                "failed_teams": 0,
+                "message": None,
+                "error": f"按邮箱反查成员所在 Team 失败: {str(e)}"
             }
 
     async def remove_invite_or_member(

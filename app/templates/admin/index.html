@@ -39,6 +39,32 @@
     </div>
 </div>
 
+<div class="content-section">
+    <div class="section-header">
+        <div>
+            <h3>成员反查</h3>
+            <p class="lookup-helper-text">适用于没有兑换记录、直接被加入车队的邮箱。该查询会实时扫描已导入的 Team，通常需要几秒到十几秒。</p>
+        </div>
+    </div>
+
+    <form id="memberLookupForm" class="search-form-grid">
+        <div class="form-group">
+            <label for="memberLookupEmail">成员邮箱</label>
+            <input type="text" inputmode="email" autocomplete="email" id="memberLookupEmail" class="form-control"
+                placeholder="输入要反查的成员邮箱">
+        </div>
+        <div class="form-actions lookup-actions">
+            <button type="submit" class="btn btn-primary" id="memberLookupButton">
+                <i data-lucide="search" style="width: 16px; height: 16px;"></i> 开始反查
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="resetMemberLookup()">清空</button>
+        </div>
+    </form>
+
+    <div id="memberLookupSummary" class="lookup-summary" style="display: none;"></div>
+    <div id="memberLookupResult" style="display: none;"></div>
+</div>
+
 <!-- Team 列表 -->
 <div class="content-section">
     <div class="section-header">
@@ -330,6 +356,11 @@
         // Init Column Toggler
         initColumnToggler('.data-table', 'team_list_columns');
 
+        const memberLookupForm = document.getElementById('memberLookupForm');
+        if (memberLookupForm) {
+            memberLookupForm.addEventListener('submit', handleMemberLookup);
+        }
+
         // 绑定查看成员按钮
         document.querySelectorAll('.btn-view-members').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -453,6 +484,168 @@
             }
         } catch (error) {
             showToast('网络错误', 'error');
+        }
+    }
+
+    function setMemberLookupLoading(loading) {
+        const button = document.getElementById('memberLookupButton');
+        if (!button) return;
+
+        button.disabled = loading;
+        button.innerHTML = loading
+            ? '<i data-lucide="loader-circle" style="width: 16px; height: 16px;"></i> 扫描中...'
+            : '<i data-lucide="search" style="width: 16px; height: 16px;"></i> 开始反查';
+
+        if (window.lucide) {
+            lucide.createIcons();
+        }
+    }
+
+    function resetMemberLookup() {
+        const input = document.getElementById('memberLookupEmail');
+        const summary = document.getElementById('memberLookupSummary');
+        const result = document.getElementById('memberLookupResult');
+
+        if (input) {
+            input.value = '';
+        }
+        if (summary) {
+            summary.style.display = 'none';
+            summary.innerHTML = '';
+        }
+        if (result) {
+            result.style.display = 'none';
+            result.innerHTML = '';
+        }
+    }
+
+    function renderMemberLookupResult(data) {
+        const summary = document.getElementById('memberLookupSummary');
+        const result = document.getElementById('memberLookupResult');
+        if (!summary || !result) return;
+
+        summary.style.display = 'block';
+        result.style.display = 'block';
+
+        const matchCount = (data.matches || []).length;
+        const failedTeams = data.failed_teams || 0;
+        summary.innerHTML = `
+            <div class="lookup-summary-row">
+                <span>邮箱: <strong>${escapeHtml(data.email || '')}</strong></span>
+                <span>扫描 Team: <strong>${data.scanned_teams || 0}</strong></span>
+                <span>命中: <strong>${matchCount}</strong></span>
+                <span>失败: <strong>${failedTeams}</strong></span>
+            </div>
+            <div class="lookup-helper-text">${escapeHtml(data.message || '')}</div>
+        `;
+
+        if (!matchCount) {
+            result.innerHTML = `
+                <div class="lookup-empty">
+                    未在已导入 Team 中找到该邮箱。
+                    ${failedTeams ? '部分 Team 扫描失败，建议稍后重试。' : ''}
+                </div>
+            `;
+            return;
+        }
+
+        const rows = data.matches.map(match => {
+            const teamIdLiteral = JSON.stringify(String(match.team_id));
+            const teamEmailLiteral = JSON.stringify(match.team_email || '');
+
+            return `
+                <tr>
+                    <td><span class="text-muted">${match.team_id}</span></td>
+                    <td>${escapeHtml(match.team_email || '-')}</td>
+                    <td>${escapeHtml(match.team_name || '-')}</td>
+                    <td>
+                        <span class="status-badge status-${match.member_status === 'joined' ? 'active' : 'warning'}">
+                            ${match.member_status === 'joined' ? '已加入' : '待加入'}
+                        </span>
+                    </td>
+                    <td>${formatDateTime(match.added_at)}</td>
+                    <td>
+                        <span class="member-count">${match.current_members || 0}/${match.pending_members || 0}/${match.max_members || 5}</span>
+                    </td>
+                    <td style="text-align: right;">
+                        <button type="button" class="btn btn-sm btn-secondary" onclick='viewMembers(${teamIdLiteral}, ${teamEmailLiteral})'>
+                            查看成员
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        const failureNote = failedTeams
+            ? `<div class="lookup-warning">有 ${failedTeams} 个 Team 扫描失败，结果可能不完整。</div>`
+            : '';
+
+        result.innerHTML = `
+            <div class="table-container lookup-table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Team ID</th>
+                            <th>车队邮箱</th>
+                            <th>Team 名称</th>
+                            <th>成员状态</th>
+                            <th>加入时间</th>
+                            <th>已入/待入/最大</th>
+                            <th style="text-align: right;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+            ${failureNote}
+        `;
+    }
+
+    async function handleMemberLookup(event) {
+        event.preventDefault();
+
+        const input = document.getElementById('memberLookupEmail');
+        const summary = document.getElementById('memberLookupSummary');
+        const result = document.getElementById('memberLookupResult');
+        const email = input ? input.value.trim() : '';
+
+        if (!email) {
+            showToast('请输入成员邮箱', 'error');
+            return;
+        }
+
+        if (summary) {
+            summary.style.display = 'block';
+            summary.innerHTML = '<div class="lookup-helper-text">正在扫描已导入 Team，请稍候...</div>';
+        }
+        if (result) {
+            result.style.display = 'none';
+            result.innerHTML = '';
+        }
+
+        setMemberLookupLoading(true);
+
+        try {
+            const searchUrl = `/admin/teams/member-search?email=${encodeURIComponent(email)}`;
+            const apiResult = await apiCall(searchUrl, { method: 'GET' });
+
+            if (!apiResult.success) {
+                throw new Error(apiResult.error || '反查失败');
+            }
+
+            renderMemberLookupResult(apiResult.data);
+        } catch (error) {
+            if (summary) {
+                summary.style.display = 'block';
+                summary.innerHTML = `<div class="lookup-warning">${escapeHtml(error.message || '反查失败')}</div>`;
+            }
+            if (result) {
+                result.style.display = 'none';
+                result.innerHTML = '';
+            }
+            showToast(error.message || '反查失败', 'error');
+        } finally {
+            setMemberLookupLoading(false);
         }
     }
     async function editTeam(teamId) {

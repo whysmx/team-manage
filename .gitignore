@@ -53,6 +53,7 @@ nul
 # Temporary files
 *.tmp
 *.bak
+.server.pid
 
 # Environment variables
 .env

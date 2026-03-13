@@ -119,7 +119,7 @@ cp .env.example .env
 APP_NAME=GPT Team 管理系统
 APP_VERSION=0.1.0
 APP_HOST=0.0.0.0
-APP_PORT=8008
+APP_PORT=8009
 DEBUG=True
 
 # 数据库配置（默认使用 SQLite）
@@ -150,7 +150,7 @@ python init_db.py
 
 ```bash
 # 开发模式（自动重载）
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8008
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8009
 
 # 或者直接运行
 python app/main.py
@@ -158,9 +158,9 @@ python app/main.py
 
 ### 7. 访问应用
 
-- **用户兑换页面**: http://localhost:8008/
-- **管理员登录页面**: http://localhost:8008/login
-- **管理员控制台**: http://localhost:8008/admin
+- **用户兑换页面**: http://localhost:8009/
+- **管理员登录页面**: http://localhost:8009/login
+- **管理员控制台**: http://localhost:8009/admin
 
 **默认管理员账号**:
 - 用户名: `admin`
@@ -281,7 +281,7 @@ team-manage/
 ### 管理员操作流程
 
 1. **登录管理员面板**
-   - 访问 http://localhost:8008/login
+   - 访问 http://localhost:8009/login
    - 使用默认账号登录（admin/admin123）
    - 首次登录后建议修改密码
 
@@ -311,7 +311,7 @@ team-manage/
 ### 用户兑换流程
 
 1. **访问兑换页面**
-   - 访问 http://localhost:8008/
+   - 访问 http://localhost:8009/
 
 2. **输入信息**
    - 填写邮箱地址

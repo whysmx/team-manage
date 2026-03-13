@@ -874,6 +874,56 @@ body {
     align-items: center;
 }
 
+.lookup-helper-text {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    margin-top: 0.35rem;
+}
+
+.lookup-actions {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+
+.lookup-summary {
+    margin-top: -0.25rem;
+    margin-bottom: 1rem;
+}
+
+.lookup-summary-row {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+    font-size: 0.875rem;
+}
+
+.lookup-empty,
+.lookup-warning {
+    border: 1px solid var(--border-base);
+    border-radius: var(--radius-md);
+    padding: 0.9rem 1rem;
+    font-size: 0.875rem;
+}
+
+.lookup-empty {
+    background: var(--bg-main);
+    color: var(--text-muted);
+}
+
+.lookup-warning {
+    background: var(--warning-soft);
+    border-color: #fde68a;
+    color: #92400e;
+    margin-top: 1rem;
+}
+
+.lookup-table-container {
+    max-height: 420px;
+}
+
 /* Modal Tabs */
 .modal-tabs {
     display: flex;

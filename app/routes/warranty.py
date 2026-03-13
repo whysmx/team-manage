@@ -41,6 +41,7 @@ class WarrantyCheckRecord(BaseModel):
 class WarrantyCheckResponse(BaseModel):
     """质保查询响应"""
     success: bool
+    code_exists: bool = False
     has_warranty: bool
     warranty_valid: bool
     warranty_expires_at: Optional[str]
@@ -49,6 +50,7 @@ class WarrantyCheckResponse(BaseModel):
     original_code: Optional[str]
     records: list[WarrantyCheckRecord] = []
     message: Optional[str]
+    group_qr_url: Optional[str] = None
     error: Optional[str]
 
 
@@ -84,8 +86,21 @@ async def check_warranty(
                 detail=result.get("error", "查询失败")
             )
         
+        group_qr_url = None
+        if request.code and result.get("code_exists"):
+            try:
+                from app.services.settings import settings_service
+
+                group_qr_path = await settings_service.get_setting(db_session, "group_qr_path", "")
+                group_qr_version = await settings_service.get_setting(db_session, "group_qr_version", "")
+                if group_qr_path:
+                    group_qr_url = f"{group_qr_path}?v={group_qr_version}" if group_qr_version else group_qr_path
+            except Exception:
+                group_qr_url = None
+
         return WarrantyCheckResponse(
             success=True,
+            code_exists=result.get("code_exists", False),
             has_warranty=result.get("has_warranty", False),
             warranty_valid=result.get("warranty_valid", False),
             warranty_expires_at=result.get("warranty_expires_at"),
@@ -94,6 +109,7 @@ async def check_warranty(
             original_code=result.get("original_code"),
             records=result.get("records", []),
             message=result.get("message"),
+            group_qr_url=group_qr_url,
             error=None
         )
         

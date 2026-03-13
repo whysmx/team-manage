@@ -85,7 +85,7 @@ document.getElementById('verifyForm').addEventListener('submit', async (e) => {
 
     // 恢复按钮状态 (如果 confirmRedeem 失败并显示了错误也没关系，因为用户可以点返回重试)
     verifyBtn.disabled = false;
-    verifyBtn.textContent = '验证兑换码';
+    verifyBtn.textContent = '兑换ChatGPT会员';
 });
 
 // 渲染Team列表
@@ -321,7 +321,7 @@ async function checkWarranty() {
 
     // 验证输入
     if (!input) {
-        showToast('请输入原兑换码或邮箱进行查询', 'error');
+        showToast('请输入查询内容', 'error');
         return;
     }
 
@@ -363,7 +363,7 @@ async function checkWarranty() {
         showToast('网络错误，请稍后重试', 'error');
     } finally {
         checkBtn.disabled = false;
-        checkBtn.innerHTML = '<i data-lucide="search"></i> 查询质保状态';
+        checkBtn.innerHTML = '<i data-lucide="search"></i> 查 兑换码/邮箱/群二维码';
         if (window.lucide) lucide.createIcons();
     }
 }
@@ -371,10 +371,20 @@ async function checkWarranty() {
 // 显示质保查询结果
 function showWarrantyResult(data) {
     const warrantyContent = document.getElementById('warrantyContent');
+    const groupQrUrl = data.group_qr_url ? escapeHtml(data.group_qr_url) : '';
+    const groupQrHtml = groupQrUrl ? `
+        <div class="qr-top-card" style="margin: 0 auto 1.5rem auto;">
+            <p class="qr-top-title">加入企业微信群提供<span style="color: var(--danger);">售后服务</span></p>
+            <p class="qr-top-title">提供GPT/Gemini/Grok/Cursor等会员服务</p>
+            <img src="${groupQrUrl}" alt="群邀请二维码" class="qr-top-image">
+            <p class="qr-top-warning" style="margin-top: 10px;">⚠️ 群二维码即将失效</p>
+        </div>
+    ` : '';
 
     if (!data.records || data.records.length === 0) {
         warrantyContent.innerHTML = `
-            <div class="result-info" style="text-align: center; padding: 2rem;">
+            ${groupQrHtml}
+            <div class="result-info" style="text-align: center; padding: 2rem; background: var(--bg-main); border: 1px solid var(--border-base); border-radius: 14px; box-shadow: var(--shadow-sm);">
                 <div class="result-icon"><i data-lucide="info" style="width: 48px; height: 48px; color: var(--text-muted);"></i></div>
                 <div class="result-title" style="font-size: 1.2rem; margin: 1rem 0;">未找到兑换记录</div>
                 <div class="result-message" style="color: var(--text-muted);">${escapeHtml(data.message || '未找到相关记录')}</div>
@@ -389,7 +399,7 @@ function showWarrantyResult(data) {
                 '<span class="badge badge-error">✗ 质保已过期</span>';
 
             summaryHtml = `
-                <div class="warranty-summary" style="margin-bottom: 2rem; padding: 1.2rem; background: rgba(255,255,255,0.03); border-radius: 12px; border: 1px solid var(--border-base);">
+                <div class="warranty-summary" style="margin-bottom: 2rem; padding: 1.2rem; background: var(--primary-soft); border-radius: 12px; border: 1px solid #c7d2fe; box-shadow: var(--shadow-sm);">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div>
                             <div style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.4rem;">当前质保状态</div>
@@ -424,10 +434,22 @@ function showWarrantyResult(data) {
             else if (record.team_status === 'expired') teamStatusBadge = '<span style="color: var(--text-muted); font-size: 0.8rem;">● 过期</span>';
             else teamStatusBadge = `<span style="color: var(--text-muted); font-size: 0.8rem;">● ${record.team_status || '未知'}</span>`;
 
+            const recordCode = escapeHtml(record.code || '-');
+            const recordEmail = escapeHtml(record.email || '-');
+
             return `
-                            <div class="record-card" style="padding: 1rem; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 10px;">
+                            <div class="record-card" style="padding: 1rem; background: var(--bg-main); border: 1px solid var(--border-base); border-radius: 10px; box-shadow: var(--shadow-sm);">
                                 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.8rem;">
-                                    <div style="font-family: monospace; font-size: 1.1rem; color: var(--text-primary);">${record.code}</div>
+                                    <div style="display: flex; flex-direction: column; gap: 0.35rem;">
+                                        <div>
+                                            <span style="color: var(--text-muted); font-size: 0.78rem; margin-right: 0.5rem;">兑换码</span>
+                                            <span style="font-family: monospace; font-size: 1.1rem; color: var(--text-primary);">${recordCode}</span>
+                                        </div>
+                                        <div>
+                                            <span style="color: var(--text-muted); font-size: 0.78rem; margin-right: 0.5rem;">邮箱</span>
+                                            <span style="color: var(--text-secondary);">${recordEmail}</span>
+                                        </div>
+                                    </div>
                                     <div>${typeMarker}</div>
                                 </div>
                                 <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 1rem; font-size: 0.9rem;">
@@ -489,6 +511,7 @@ function showWarrantyResult(data) {
 
         warrantyContent.innerHTML = `
             <div class="warranty-view">
+                ${groupQrHtml}
                 ${summaryHtml}
                 ${recordsHtml}
                 ${canReuseHtml}

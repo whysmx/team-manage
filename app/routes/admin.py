@@ -501,6 +501,51 @@ async def team_members_list(
         )
 
 
+@router.get("/teams/member-search")
+async def search_member_team(
+    email: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    按成员邮箱跨 Team 反查所在车队。
+    """
+    try:
+        normalized_email = normalize_email_input(email, required=True, field_label="成员邮箱")
+        logger.info(f"管理员按成员邮箱反查车队: {normalized_email}")
+
+        result = await team_service.find_member_teams_by_email(
+            email=normalized_email,
+            db_session=db
+        )
+
+        if not result["success"]:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=result
+            )
+
+        return JSONResponse(content=result)
+
+    except ValueError as e:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "success": False,
+                "error": str(e)
+            }
+        )
+    except Exception as e:
+        logger.error(f"成员邮箱反查车队失败: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "success": False,
+                "error": f"成员邮箱反查车队失败: {str(e)}"
+            }
+        )
+
+
 @router.post("/teams/{team_id}/members/add")
 async def add_team_member(
     team_id: int,

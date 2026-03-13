@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GPT Team 兑换</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/css/user.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/user.css') }}{% if redeem_css_version %}?v={{ redeem_css_version }}{% endif %}">
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 </head>
@@ -15,12 +15,19 @@
         <div class="header">
             <h1>GPT Team 兑换</h1>
             {% if remaining_spots is not none %}
-            <div class="spots-badge"
-                style="display: inline-flex; align-items: center; gap: 6px; background: var(--primary-soft); padding: 6px 12px; border-radius: 20px; font-size: 0.875rem; color: var(--primary); margin-top: 10px; border: 1px solid var(--border-base);">
-                <i data-lucide="users" style="width: 14px; height: 14px;"></i>
-                已服务人数：{{ served_count }}
-                <span style="opacity: 0.5;">|</span>
-                剩余车位: {{ remaining_spots }}
+            <div class="spots-badge">
+                <a class="badge-link" href="https://shop.cursorvip.com" target="_blank" rel="noopener noreferrer">
+                    <i data-lucide="shopping-bag"></i>
+                    访问商城
+                </a>
+                <span class="badge-divider">|</span>
+                <span class="badge-item">
+                    已服务人数：{{ served_count }}
+                </span>
+                <span class="badge-divider">|</span>
+                <span class="badge-item">
+                    剩余车位：{{ remaining_spots }}
+                </span>
             </div>
             {% endif %}
         </div>
@@ -32,9 +39,8 @@
                         <form id="verifyForm">
                             <div class="form-group">
                                 <label for="email">邮箱地址</label>
-                                <input type="text" inputmode="email" autocomplete="email" id="email" name="email" required placeholder="请输入您的邮箱地址"
+                                <input type="text" inputmode="email" autocomplete="email" id="email" name="email" required placeholder="请输入已注册了ChatGPT的邮箱账号"
                                     class="form-input">
-                                <p class="form-help">请填写您要接受邀请的账号的邮箱，邀请将发送到此邮箱</p>
                             </div>
 
                             <div class="form-group">
@@ -44,27 +50,17 @@
                             </div>
 
                             <button type="submit" class="btn btn-primary" id="verifyBtn">
-                                <i data-lucide="shield-check"></i> 验证兑换码
+                                <i data-lucide="shield-check"></i> 兑换ChatGPT会员
                             </button>
                         </form>
 
                         <!-- 质保查询区域 -->
-                        <div class="warranty-section"
-                            style="margin-top: 40px; padding-top: 30px; border-top: 1px solid var(--border-base);">
-                            <h3 style="font-size: 1.1rem; margin-bottom: 15px; color: var(--text-primary);">
-                                <i data-lucide="shield" style="width: 18px; height: 18px; vertical-align: middle;"></i>
-                                质保查询
-                            </h3>
-                            <p class="form-help" style="margin-bottom: 15px; font-size: 1rem; color: var(--text-primary);">
-                                🛡️ 含质保的兑换码｜♻️ 退出团队仍可重新兑换
-                            </p>
-                            <div class="form-group" style="margin-bottom: 15px;">
-                                <input type="text" id="warrantyInput" placeholder="请输入原兑换码或邮箱进行查询"
-                                    class="form-input">
+                        <div class="warranty-section">
+                            <div class="form-group">
+                                <input type="text" id="warrantyInput" class="form-input">
                             </div>
-                            <button type="button" class="btn btn-secondary" id="checkWarrantyBtn" onclick="checkWarranty()"
-                                style="width: 100%;">
-                                <i data-lucide="search"></i> 查询质保状态
+                            <button type="button" class="btn btn-secondary" id="checkWarrantyBtn" onclick="checkWarranty()">
+                                <i data-lucide="search"></i> 查 兑换码/邮箱/群二维码
                             </button>
                         </div>
                     </div>
